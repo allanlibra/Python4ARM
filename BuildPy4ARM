@@ -1,0 +1,130 @@
+#!/bin/bash
+#set -x
+SrcFld=
+BldFld=
+CrossPre=arm-none-linux-gnueabi-
+CGCC="$CrossPre"gcc
+CCXX="$CrossPre"g++
+CAR="$CrossPre"ar
+CRANLIB="$CrossPre"ranlib
+CompatibleList="2.6.6 2.7.2 2.7.3 3.1.2 3.2.2"
+PatchList="
+http://randomsplat.com/wp-content/uploads/2010/10/Python-2.6.6-xcompile.patch 
+http://randomsplat.com/wp-content/uploads/2011/10/Python-2.7.2-xcompile.patch 
+http://randomsplat.com/wp-content/uploads/2012/10/Python-2.7.3-xcompile.patch 
+http://randomsplat.com/wp-content/uploads/2009/08/Python-3.1.1-xcompile.patch 
+http://randomsplat.com/wp-content/uploads/2010/04/Python-3.1.2-xcompile.patch 
+http://randomsplat.com/wp-content/uploads/2011/01/Python-3.1.3-xcompile.patch 
+http://randomsplat.com/wp-content/uploads/2011/10/Python-3.2.2-xcompile.patch
+"
+Postfix=".tgz .tar.xz"
+Help()
+{
+echo ""
+echo -e "\tUsage:$0 2.6.6"
+echo "**********************NOTICE***********************"
+echo "This Script compatible with below Python Version"
+for Ver in $CompatibleList
+do
+	echo -e "\t$Ver"
+done
+echo "Place the Python-x.x.x-xcompile.patch and Python source tar-ball in one folder"
+echo "or"
+echo "This script will download all the needed file automatic"
+echo -e "Please Visit \n\thttp://randomsplat.com/id5-cross-compiling-python-for-embedded-linux.html \nto learn more"
+echo ""
+}
+
+Make()
+{
+CC=$CGCC CXX=$CCXX AR=$CAR RANLIB=$CRANLIB ./configure --host=arm-linux --build=x86_64-linux-gnu --prefix=/python
+
+[ ! $? -eq 0 ] && echo "configure failed!" && exit -1
+make -j6 HOSTPYTHON=./hostpython HOSTPGEN=./Parser/hostpgen BLDSHARED="$CGCC -shared" CROSS_COMPILE="$CrossPre" CROSS_COMPILE_TARGET=yes HOSTARCH=arm-linux BUILDARCH=x86_64-linux-gnu
+[ ! $? -eq 0 ] && echo "make Failed!" && exit -1
+make install HOSTPYTHON=./hostpython BLDSHARED="$CGCC -shared" CROSS_COMPILE="$CrossPre" CROSS_COMPILE_TARGET=yes prefix=$BldFld
+
+[ ! $? -eq 0 ]&&echo "Install Failed!" && exit -1
+echo "Make Complete,Please Check $BldFld"
+}
+
+Config()
+{
+./configure
+make -j4 python Parser/pgen
+[ ! -f ./python ]&&echo "make python failed"&& exit -1
+mv python hostpython
+[ ! -f ./Parser/pgen ]&&echo "make Parser/pgen failed"&&exit -1
+mv Parser/pgen Parser/hostpgen
+make distclean
+patch -p1 < $Patch
+}
+
+CheckArg()
+{
+for tmp in $CompatibleList
+do
+[ "$1" == "$tmp" ]&&return 0
+done
+return -1
+}
+
+CheckEnv()
+{
+SrcFld=Python-$1
+Patch="$SrcFld"-xcompile.patch
+BldFld=$(pwd)/$SrcFld"-ARM"
+for Pos in $Postfix
+do
+	Tmp=$SrcFld$Pos
+	[ -f $Tmp ]&&TarFile=$Tmp&&break
+done
+if [ "$TarFile" == "" ]
+then
+echo "$1 is not found,download it?[Y/n]"
+read -n 1 Choice
+echo ""
+[ "$Choice" == "n" ]&&exit 0
+RemoteFile=https://www.python.org/ftp/python/$1/Python-$1".tgz"
+wget $RemoteFile
+TarFile=$SrcFld".tgz"
+[ ! -f $TarFile ]&&echo "Can not get $TarFile"&&exit -1
+fi
+
+if [ ! -f $Patch ]
+then
+for tmp in $PatchList
+do
+	[ "$(echo $tmp|grep $1)" != "" ]&&RemoteFile=$tmp
+done
+[ "$RemoteFile" == "" ]&&echo "no such file:$1"&&return -1
+wget $RemoteFile
+[ ! -f $Patch ]&&echo "Can not get $Patch"&&exit -1
+fi
+
+[ -d $SrcFld ]&&rm -rf $SrcFld
+tar axf $TarFile 
+[ ! -d $SrcFld ]&&echo "no $SrcFld"&&exit -1
+cp $Patch $SrcFld/
+echo
+}
+
+Build()
+{
+TarFile=
+CheckArg $1
+[ $? -eq -1 ]&&echo -e "Not support $1,Please input one of below:\n$CompatibleList"&&exit -1
+CheckEnv $1
+pushd $SrcFld
+Config
+Make
+popd
+}
+
+
+case $1 in
+"-h"|"")
+	Help;;
+*)
+	Build $1;;
+esac
